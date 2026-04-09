@@ -330,6 +330,21 @@ class Session(requests.Session):
         if self.default_timeout and not kwargs.get("timeout"):
             kwargs["timeout"] = self.default_timeout
         return super().send(request, **kwargs)
+    
+def _parse_basic_auth(url: str) -> t.Tuple[str, str]:
+    """Parse HTTP Basic username and password from URL.
+
+    Args:
+        url: URL to process
+
+    Returns:
+        Tuple containing the username and password
+            (or containing empty strings if the URL has no username and/or password)
+    """
+    parsed = urllib.parse.urlsplit(url)
+    username = parsed.username if parsed.username else ""
+    password = parsed.password if parsed.password else ""
+    return username, password
 
 
 def _mask_password(url: str) -> str:
@@ -491,9 +506,23 @@ class _IndexCache:
         self._packages = {}
         self._index_url_masked = _mask_password(index_url)
         self._stats = _CacheStats(name=f"Index {self._index_url_masked!r}")
+        username, password = _parse_basic_auth(index_url)
+        if username:
+            # password either supplied or empty str
+            self._auth = (username, password)
+        else:
+            self._auth = None
 
     def __repr__(self):
         return f"{self.__class__.__name__}({self._index_url_masked!r}, {self.ttl!r})"
+
+    def get(self, url, **kwargs):
+        """Wrapper for self.session.get to configure auth if provided."""
+        if self._auth:
+            response = self.session.get(url, auth=self._auth, **kwargs)
+        else:
+            response = self.session.get(url, **kwargs)
+        return response
 
     def _list_packages(self):
         """List projects using or updating cache."""
